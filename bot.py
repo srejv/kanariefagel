@@ -31,7 +31,7 @@ def unicode_to_twemoji_url(emoji_char: str) -> str:
     codepoints = "-".join(
         f"{ord(c):x}" for c in emoji_char if ord(c) != 0xFE0F
     )
-    return f"https://cdn.jsdelivr.net/gh/twitter/twemoji@latest/assets/72x72/{codepoints}.png"
+    return f"https://cdn.jsdelivr.net/gh/jdecked/twemoji@latest/assets/72x72/{codepoints}.png"
 
 
 def parse_emojis(text):
@@ -66,7 +66,8 @@ async def fetch_image(url: str) -> Image.Image | None:
             img = Image.open(io.BytesIO(r.content)).convert("RGBA")
             img = img.resize((EMOJI_SIZE, EMOJI_SIZE), Image.LANCZOS)
             return img
-    except Exception:
+    except Exception as e:
+        print(f"Failed to fetch {url}: {e}")
         return None
 
 
@@ -106,7 +107,7 @@ async def on_message(message):
         url, name = emojis[0]
         embed = discord.Embed(color=0x5865F2)
         embed.set_image(url=url)
-        #embed.set_footer(text=f":{name}:")
+        # embed.set_footer(text=f":{name}:")
         await message.reply(embed=embed, mention_author=False)
         return
 
