@@ -99,15 +99,15 @@ async def on_message(message):
     emojis = parse_emojis(argument)[:10]
 
     if not emojis:
-        await message.reply("❌ Couldn't find any valid emoji in that message.")
+        await message.channel.send("❌ Couldn't find any valid emoji in that message.")
         return
 
     if len(emojis) == 1:
         url, name = emojis[0]
         embed = discord.Embed(color=0x5865F2)
         embed.set_image(url=url)
-        embed.set_footer(text=f":{name}:")
-        await message.reply(embed=embed, mention_author=False)
+        # embed.set_footer(text=f":{name}:")
+        await message.channel.send(embed=embed)
         return
 
     async with message.channel.typing():
@@ -118,11 +118,11 @@ async def on_message(message):
                 images.append(img)
 
         if not images:
-            await message.reply("❌ Couldn't fetch any of those emoji.")
+            await message.channel.send("❌ Couldn't fetch any of those emoji.")
             return
 
         buf = await build_composite(images)
-        await message.reply(
+        await message.channel.send(
             file=discord.File(buf, filename="jumbo.png"),
             mention_author=False,
         )
