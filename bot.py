@@ -17,8 +17,8 @@ UNICODE_EMOJI_RE = re.compile(
     "[\U0001F300-\U0001F9FF"
     "\U00002600-\U000027BF"
     "\U0001FA00-\U0001FA9F"
-    "\U0001F004\U0001F0CF"
-    "\U000024C2-\0001F251]",
+    "\U0001F004"
+    "\U0001F0CF]",
     re.UNICODE,
 )
 
@@ -27,7 +27,6 @@ PADDING = 16
 
 
 def unicode_to_twemoji_url(emoji_char: str) -> str:
-    # Twemoji uses codepoints joined by hyphens, skipping the U+FE0F variation selector
     codepoints = "-".join(
         f"{ord(c):x}" for c in emoji_char if ord(c) != 0xFE0F
     )
@@ -107,7 +106,7 @@ async def on_message(message):
         url, name = emojis[0]
         embed = discord.Embed(color=0x5865F2)
         embed.set_image(url=url)
-        # embed.set_footer(text=f":{name}:")
+        embed.set_footer(text=f":{name}:")
         await message.reply(embed=embed, mention_author=False)
         return
 
