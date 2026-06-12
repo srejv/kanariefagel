@@ -1,6 +1,9 @@
 import discord
 import re
 import os
+import io
+import httpx
+from PIL import Image
 
 TOKEN = os.environ["DISCORD_TOKEN"]
 
@@ -19,39 +22,68 @@ UNICODE_EMOJI_RE = re.compile(
     re.UNICODE,
 )
 
+EMOJI_SIZE = 128  # px per emoji in the combined image
+PADDING = 16      # px gap between emoji
+
+
 def parse_emojis(text):
-    """Return a list of (image_url, name) tuples for all emoji found in text."""
     results = []
-    # We'll scan through the string, picking off custom and unicode emoji in order
     i = 0
     while i < len(text):
-        # Try custom emoji at current position
         custom_match = CUSTOM_EMOJI_RE.match(text, i)
         if custom_match:
             animated, name, emoji_id = custom_match.groups()
-            ext = "gif" if animated else "png"
-            url = f"https://cdn.discordapp.com/emojis/{emoji_id}.{ext}?size=256"
+            # Use png even for animated — still images only in the composite
+            url = f"https://cdn.discordapp.com/emojis/{emoji_id}.png?size=256"
             results.append((url, name))
             i = custom_match.end()
             continue
 
-        # Try unicode emoji at current position
         unicode_match = UNICODE_EMOJI_RE.match(text, i)
         if unicode_match:
             emoji_char = unicode_match.group(0)
             url = f"https://emojicdn.elk.sh/{emoji_char}?style=twitter"
-            name = "-".join(f"{ord(c):x}" for c in emoji_char)
+            name = emoji_char
             results.append((url, name))
             i = unicode_match.end()
             continue
 
         i += 1
-
     return results
+
+
+async def fetch_image(url: str) -> Image.Image | None:
+    try:
+        async with httpx.AsyncClient(timeout=10) as http:
+            r = await http.get(url)
+            r.raise_for_status()
+            img = Image.open(io.BytesIO(r.content)).convert("RGBA")
+            img = img.resize((EMOJI_SIZE, EMOJI_SIZE), Image.LANCZOS)
+            return img
+    except Exception:
+        return None
+
+
+async def build_composite(images: list[Image.Image]) -> io.BytesIO:
+    n = len(images)
+    width = n * EMOJI_SIZE + (n - 1) * PADDING
+    height = EMOJI_SIZE
+    canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+
+    for i, img in enumerate(images):
+        x = i * (EMOJI_SIZE + PADDING)
+        canvas.paste(img, (x, 0), img)
+
+    buf = io.BytesIO()
+    canvas.save(buf, format="PNG")
+    buf.seek(0)
+    return buf
+
 
 @client.event
 async def on_ready():
     print(f"Logged in as {client.user}")
+
 
 @client.event
 async def on_message(message):
@@ -62,20 +94,37 @@ async def on_message(message):
         return
 
     argument = message.content[len("--jumbo "):].strip()
-    emojis = parse_emojis(argument)
+    emojis = parse_emojis(argument)[:10]  # cap at 10
 
     if not emojis:
         await message.reply("❌ Couldn't find any valid emoji in that message.")
         return
 
-    # Build one embed per emoji (Discord embeds only support one large image each)
-    embeds = []
-    for url, name in emojis[:10]:  # cap at 10 to avoid spam
+    # Single emoji — just send an embed as before (looks nicer)
+    if len(emojis) == 1:
+        url, name = emojis[0]
         embed = discord.Embed(color=0x5865F2)
         embed.set_image(url=url)
-        # embed.set_footer(text=f":{name}:")
-        embeds.append(embed)
+        #embed.set_footer(text=f":{name}:")
+        await message.reply(embed=embed, mention_author=False)
+        return
 
-    await message.reply(embeds=embeds, mention_author=False)
+    # Multiple emoji — fetch and stitch into one image
+    async with message.channel.typing():
+        images = []
+        for url, _ in emojis:
+            img = await fetch_image(url)
+            if img:
+                images.append(img)
+
+        if not images:
+            await message.reply("❌ Couldn't fetch any of those emoji.")
+            return
+
+        buf = await build_composite(images)
+        await message.reply(
+            file=discord.File(buf, filename="jumbo.png"),
+            mention_author=False,
+        )
 
 client.run(TOKEN)
