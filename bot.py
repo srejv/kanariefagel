@@ -92,10 +92,10 @@ async def on_message(message):
     if message.author == client.user:
         return
 
-    if not message.content.startswith("--jumbo "):
+    if not message.content.startswith("-jumbo "):
         return
 
-    argument = message.content[len("--jumbo "):].strip()
+    argument = message.content[len("-jumbo "):].strip()
     emojis = parse_emojis(argument)[:10]
 
     if not emojis:
