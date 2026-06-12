@@ -22,8 +22,16 @@ UNICODE_EMOJI_RE = re.compile(
     re.UNICODE,
 )
 
-EMOJI_SIZE = 128  # px per emoji in the combined image
-PADDING = 16      # px gap between emoji
+EMOJI_SIZE = 128
+PADDING = 16
+
+
+def unicode_to_twemoji_url(emoji_char: str) -> str:
+    # Twemoji uses codepoints joined by hyphens, skipping the U+FE0F variation selector
+    codepoints = "-".join(
+        f"{ord(c):x}" for c in emoji_char if ord(c) != 0xFE0F
+    )
+    return f"https://cdn.jsdelivr.net/gh/twitter/twemoji@latest/assets/72x72/{codepoints}.png"
 
 
 def parse_emojis(text):
@@ -33,7 +41,6 @@ def parse_emojis(text):
         custom_match = CUSTOM_EMOJI_RE.match(text, i)
         if custom_match:
             animated, name, emoji_id = custom_match.groups()
-            # Use png even for animated — still images only in the composite
             url = f"https://cdn.discordapp.com/emojis/{emoji_id}.png?size=256"
             results.append((url, name))
             i = custom_match.end()
@@ -42,9 +49,8 @@ def parse_emojis(text):
         unicode_match = UNICODE_EMOJI_RE.match(text, i)
         if unicode_match:
             emoji_char = unicode_match.group(0)
-            url = f"https://emojicdn.elk.sh/{emoji_char}?style=twitter"
-            name = emoji_char
-            results.append((url, name))
+            url = unicode_to_twemoji_url(emoji_char)
+            results.append((url, emoji_char))
             i = unicode_match.end()
             continue
 
@@ -55,7 +61,7 @@ def parse_emojis(text):
 async def fetch_image(url: str) -> Image.Image | None:
     try:
         async with httpx.AsyncClient(timeout=10) as http:
-            r = await http.get(url)
+            r = await http.get(url, follow_redirects=True)
             r.raise_for_status()
             img = Image.open(io.BytesIO(r.content)).convert("RGBA")
             img = img.resize((EMOJI_SIZE, EMOJI_SIZE), Image.LANCZOS)
@@ -67,13 +73,9 @@ async def fetch_image(url: str) -> Image.Image | None:
 async def build_composite(images: list[Image.Image]) -> io.BytesIO:
     n = len(images)
     width = n * EMOJI_SIZE + (n - 1) * PADDING
-    height = EMOJI_SIZE
-    canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-
+    canvas = Image.new("RGBA", (width, EMOJI_SIZE), (0, 0, 0, 0))
     for i, img in enumerate(images):
-        x = i * (EMOJI_SIZE + PADDING)
-        canvas.paste(img, (x, 0), img)
-
+        canvas.paste(img, (i * (EMOJI_SIZE + PADDING), 0), img)
     buf = io.BytesIO()
     canvas.save(buf, format="PNG")
     buf.seek(0)
@@ -94,13 +96,12 @@ async def on_message(message):
         return
 
     argument = message.content[len("--jumbo "):].strip()
-    emojis = parse_emojis(argument)[:10]  # cap at 10
+    emojis = parse_emojis(argument)[:10]
 
     if not emojis:
         await message.reply("❌ Couldn't find any valid emoji in that message.")
         return
 
-    # Single emoji — just send an embed as before (looks nicer)
     if len(emojis) == 1:
         url, name = emojis[0]
         embed = discord.Embed(color=0x5865F2)
@@ -109,7 +110,6 @@ async def on_message(message):
         await message.reply(embed=embed, mention_author=False)
         return
 
-    # Multiple emoji — fetch and stitch into one image
     async with message.channel.typing():
         images = []
         for url, _ in emojis:
